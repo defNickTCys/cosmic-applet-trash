@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Frontend: Conteúdo do popup
+//! Frontend: Popup content
 
 use crate::app::Message;
 use crate::fl;
@@ -17,9 +17,15 @@ pub fn view<'a>(trash_status: &TrashStatus, core: &cosmic::Core) -> Element<'a, 
                 .apply(widget::container)
                 .padding([12, 20]),
         )
-        .push(widget::text(format!("{} items", trash_status.item_count)).apply(widget::container).padding([0, 20, 12, 20]))
+        .push(
+            widget::text(format!("{} items", trash_status.item_count))
+                .apply(widget::container)
+                .padding([0, 20, 12, 20]),
+        )
         .push(padded_control(widget::divider::horizontal::default()))
-        .push(menu_button(widget::text::body(fl!("open-trash"))).on_press(Message::OpenTrashFolder));
+        .push(
+            menu_button(widget::text::body(fl!("open-trash"))).on_press(Message::OpenTrashFolder),
+        );
 
     core.applet.popup_container(content).into()
 }
