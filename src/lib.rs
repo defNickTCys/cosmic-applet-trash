@@ -11,6 +11,7 @@ pub mod app;
 pub mod config;
 pub mod file_manager;
 pub mod i18n;
+pub mod trash_operations;
 pub mod trash_status;
 pub mod ui_panel_button;
 pub mod ui_popup;
