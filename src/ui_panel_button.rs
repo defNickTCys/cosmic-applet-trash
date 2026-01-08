@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Frontend: Ícone do painel (reativo ao status da lixeira)
-//! 
-//! UI adaptável: usa ícone colorido na Dock e symbolic no Painel
+//! Frontend: Panel icon (reactive to trash status)
+//!
+//! Adaptive UI: uses colored icon in Dock and symbolic icon in Panel
 
 use crate::app::Message;
 use crate::trash_status::TrashStatus;
@@ -10,11 +10,12 @@ use cosmic::applet::PanelType;
 use cosmic::prelude::*;
 use cosmic::widget;
 
+#[must_use]
 pub fn view<'a>(trash_status: &TrashStatus, core: &cosmic::Core) -> Element<'a, Message> {
     match &core.applet.panel_type {
         PanelType::Dock => {
-            // Dock: ícone grande colorido (sem suffix -symbolic)
-            let icon_size = core.applet.suggested_size(false).0; // false = não symbolic
+            // Dock: large colored icon (without -symbolic suffix)
+            let icon_size = core.applet.suggested_size(false).0; // false = not symbolic
             let padding = core.applet.suggested_padding(false);
 
             widget::button::custom(
@@ -26,7 +27,7 @@ pub fn view<'a>(trash_status: &TrashStatus, core: &cosmic::Core) -> Element<'a, 
             .into()
         }
         PanelType::Panel | PanelType::Other(_) => {
-            // Painel: ícone pequeno symbolic (icon_button adiciona -symbolic automaticamente)
+            // Panel: small symbolic icon (icon_button adds -symbolic automatically)
             core.applet
                 .icon_button(trash_status.icon_name_panel())
                 .on_press(Message::TogglePopup)

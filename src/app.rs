@@ -2,48 +2,52 @@
 
 use crate::config::Config;
 use crate::trash_status::TrashStatus;
-use crate::{dbus_file_manager, ui_panel_button, ui_popup};
+use crate::{file_manager, ui_panel_button, ui_popup};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::{Limits, Subscription, window::Id};
+use cosmic::iced_futures::stream;
 use cosmic::iced_winit::commands::popup::{destroy_popup, get_popup};
 use cosmic::prelude::*;
+use notify_debouncer_full::{DebounceEventResult, new_debouncer, notify};
+use std::any::TypeId;
+use std::time::Duration;
 
-/// AppModel: Orquestrador de estado e mensagens
+/// `AppModel`: Application state and message orchestrator
 pub struct AppModel {
     core: cosmic::Core,
     popup: Option<Id>,
     config: Config,
 
-    // Estado da lixeira (reativo)
+    // Trash state (reactive)
     trash_status: TrashStatus,
 }
 
-/// Mensagens do applet
+/// Applet messages
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Algumas variantes serão usadas em fases futuras
+#[allow(dead_code)] // Some variants will be used in future phases
 pub enum Message {
     // Popup
     TogglePopup,
     PopupClosed(Id),
 
-    // Configuração
+    // Configuration
     UpdateConfig(Config),
 
-    // Lixeira (Backend)
+    // Trash (Backend)
     TrashStatusChanged(TrashStatus),
     EmptyTrash,
     RestoreItems,
     OpenTrashFolder,
 
-    // [FASE 2+] Drag & Drop (fundação)
+    // [PHASE 2+] Drag &amp; Drop (foundation)
     DndUriReceived(String),
     DndOfferAccepted,
     DndOfferRejected,
 
-    // [FASE 3+] Ejeção de discos
+    // [PHASE 3+] Disk Eject
     EjectDrive(String),
 
-    // [FASE 4+] Desinstalação
+    // [PHASE 4+] App Uninstall
     UninstallApp(String),
 }
 
@@ -70,8 +74,7 @@ impl cosmic::Application for AppModel {
 
         let config = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
             .map(|context| match Config::get_entry(&context) {
-                Ok(config) => config,
-                Err((_, config)) => config,
+                Ok(config) | Err((_, config)) => config,
             })
             .unwrap_or_default();
 
@@ -100,11 +103,71 @@ impl cosmic::Application for AppModel {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        // [FASE 1] Adicionar monitoramento inotify aqui
+        struct TrashWatcherSubscription;
+
+        let watcher_subscription = Subscription::run_with_id(
+            TypeId::of::<TrashWatcherSubscription>(),
+            stream::channel(1, |mut output| {
+                #[allow(clippy::semicolon_if_nothing_returned)]
+                async move {
+                    let watcher_res = new_debouncer(
+                        Duration::from_millis(250),
+                        Some(Duration::from_millis(250)),
+                        move |event_res: DebounceEventResult| match event_res {
+                            Ok(events) => {
+                                let should_rescan =
+                                    events.iter().any(|event| !event.kind.is_access());
+
+                                if should_rescan {
+                                    let new_status = TrashStatus::check();
+                                    if let Err(e) =
+                                        output.try_send(Message::TrashStatusChanged(new_status))
+                                    {
+                                        eprintln!("Failed to send trash status update: {e:?}");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to watch trash: {e:?}");
+                            }
+                        },
+                    );
+
+                    #[cfg(unix)]
+                    match (watcher_res, trash::os_limited::trash_folders()) {
+                        (Ok(mut watcher), Ok(trash_bins)) => {
+                            let trash_paths = trash_bins
+                                .into_iter()
+                                .flat_map(|path| [path.join("files"), path]);
+
+                            for path in trash_paths {
+                                if let Err(e) =
+                                    watcher.watch(&path, notify::RecursiveMode::NonRecursive)
+                                {
+                                    eprintln!("Failed to watch {}: {:?}", path.display(), e);
+                                }
+                            }
+
+                            std::future::pending().await
+                        }
+                        (Err(e), _) => {
+                            eprintln!("Failed to create trash watcher: {e:?}");
+                        }
+                        (_, Err(e)) => {
+                            eprintln!("Failed to find trash folders: {e:?}");
+                        }
+                    }
+
+                    std::future::pending().await
+                }
+            }),
+        );
+
         Subscription::batch(vec![
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
                 .map(|update| Message::UpdateConfig(update.config)),
+            watcher_subscription,
         ])
     }
 
@@ -118,17 +181,9 @@ impl cosmic::Application for AppModel {
                 self.trash_status = status;
             }
 
-            Message::EmptyTrash => {
-                // [FASE 1] Implementar
-            }
-
-            Message::RestoreItems => {
-                // [FASE 1] Implementar
-            }
-
             Message::OpenTrashFolder => {
-                // Abrir lixeira usando cosmic-files --trash
-                dbus_file_manager::open_trash_folder();
+                // Open trash using cosmic-files --trash
+                file_manager::open_trash_folder();
             }
 
             Message::TogglePopup => {
@@ -159,13 +214,15 @@ impl cosmic::Application for AppModel {
                 }
             }
 
-            // [FASES FUTURAS]
-            Message::DndUriReceived(_)
+            // [FUTURE PHASES] - Placeholders
+            Message::EmptyTrash
+            | Message::RestoreItems
+            | Message::DndUriReceived(_)
             | Message::DndOfferAccepted
             | Message::DndOfferRejected
             | Message::EjectDrive(_)
             | Message::UninstallApp(_) => {
-                // Placeholder para extensões futuras
+                // Will be implemented in future phases
             }
         }
         Task::none()

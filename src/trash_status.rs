@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Backend: Status da lixeira
+//! Backend: Trash status monitoring
 //!
-//! Replicado de cosmic-files/src/tab.rs usando trash-rs
+//! Replicated from cosmic-files/src/tab.rs using trash-rs
 
 use std::path::PathBuf;
 
-/// Status da lixeira (Backend, sem dependências de UI)
+/// Trash status (Backend, no UI dependencies)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrashStatus {
     pub is_empty: bool,
@@ -14,9 +14,10 @@ pub struct TrashStatus {
 }
 
 impl TrashStatus {
-    /// Verifica o status atual da lixeira usando trash-rs
+    ///Checks current trash status using trash-rs
     ///
-    /// Replicado de cosmic-files/src/tab.rs
+    /// Replicated from cosmic-files/src/tab.rs
+    #[must_use]
     pub fn check() -> Self {
         let is_empty = trash::os_limited::is_empty().unwrap_or(true);
         let item_count = if is_empty {
@@ -33,7 +34,8 @@ impl TrashStatus {
         }
     }
 
-    /// Retorna o ícone symbolic para o painel
+    /// Returns symbolic icon name for panel
+    #[must_use]
     pub fn icon_name_panel(&self) -> &'static str {
         if self.is_empty {
             "user-trash-symbolic"
@@ -42,10 +44,11 @@ impl TrashStatus {
         }
     }
 
-    /// Retorna o ícone colorido para a dock
+    /// Returns colored icon name for dock
+    #[must_use]
     pub fn icon_name_dock(&self) -> &'static str {
-        // Na dock, o sistema usa os ícones sem "-symbolic"
-        // e alterna automaticamente entre vazio/cheio
+        // In dock, system uses icons without "-symbolic" suffix
+        // and automatically switches between empty/full
         if self.is_empty {
             "user-trash"
         } else {
@@ -53,8 +56,9 @@ impl TrashStatus {
         }
     }
 
-    /// Retorna o caminho padrão da lixeira no Linux
-    #[allow(dead_code)] // Será usado na Fase 1 para monitoramento
+    /// Returns default trash directory path on Linux
+    #[allow(dead_code)] // Will be used in future phases
+    #[must_use]
     pub fn trash_dir() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_default();
         PathBuf::from(home).join(".local/share/Trash/files")
