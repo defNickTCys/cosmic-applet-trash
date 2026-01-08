@@ -20,15 +20,16 @@ The codebase is organized into isolated, single-responsibility modules:
 
 ```
 src/
-├── app.rs              # Application orchestrator (state + messages)
-├── trash_status.rs     # Backend: Trash monitoring logic
-├── file_manager.rs     # Native integration: cosmic-files launcher
-├── ui_panel_button.rs  # Frontend: Adaptive panel icon
-├── ui_popup.rs         # Frontend: Popup content
-├── config.rs           # Configuration management
-├── i18n.rs             # Internationalization
-├── lib.rs              # Public exports
-└── main.rs             # Entry point
+├── app.rs                # Application orchestrator (state + messages)
+├── trash_status.rs       # Backend: Trash monitoring logic
+├── trash_operations.rs   # Backend: Async trash operations (Phase 2)
+├── file_manager.rs       # Native integration: cosmic-files launcher
+├── ui_panel_button.rs    # Frontend: Adaptive panel icon
+├── ui_popup.rs           # Frontend: Popup content
+├── config.rs             # Configuration management
+├── i18n.rs               # Internationalization
+├── lib.rs                # Public exports
+└── main.rs               # Entry point
 ```
 
 ## Module Details
@@ -46,6 +47,57 @@ src/
 ```
 trash-rs API → TrashStatus::check() → { is_empty, item_count }
 ```
+
+### Backend: Trash Operations (`trash_operations.rs`) - Phase 2
+
+**Responsibility**: Asynchronous trash operations following cosmic-files patterns
+
+**Key Functions**:
+- `list_items()` - Lists all trash items (async, non-blocking)
+- `empty_trash(progress_cb)` - Empties entire trash with progress updates
+- `restore_item(item)` - Restores item to original location
+- `delete_item(item)` - Permanently deletes item
+
+**Async Flow Pattern**:
+```mermaid
+graph TD
+    A[UI Message] --> B[Task::perform]
+    B --> C[spawn_blocking]
+    C --> D[trash::os_limited::*]
+    D --> E[Result]
+    E --> F[Message Response]
+    F --> G[AppModel::update]
+    G --> H[UI Re-render]
+```
+
+**Implementation Pattern** (from cosmic-files):
+```rust
+pub async fn list_items() -> Result<Vec<TrashItem>, trash::Error> {
+    tokio::task::spawn_blocking(|| {
+        trash::os_limited::list()
+    })
+    .await
+    .map_err(|e| /* handle JoinError */)?
+}
+
+pub async fn empty_trash() -> Result<(), trash::Error> {
+    tokio::task::spawn_blocking(|| {
+        let items = trash::os_limited::list()?;
+        for item in items {
+            trash::os_limited::purge_all([item])?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| /* handle JoinError */)?
+}
+```
+
+**Key Design Choices**:
+1. **`spawn_blocking`**: Prevents blocking async runtime (trash-rs is sync)
+2. **Progress callbacks**: Enables UI progress bars (0.0-1.0 float)
+3. **Error propagation**: Returns `Result<T, trash::Error>` for clear error handling
+4. **Non-modal operations**: All operations run in background via `Task::perform`
 
 ### Native Integration (`file_manager.rs`)
 
@@ -80,6 +132,8 @@ match core.applet.panel_type {
 
 **State**:
 - `trash_status: TrashStatus` - Current trash state (reactive)
+- `trash_items: Vec<TrashItem>` - Cached item list (Phase 2)
+- `empty_in_progress: bool` - Operation state indicator (Phase 2)
 - `popup: Option<Id>` - Popup window handle
 - `config: Config` - User preferences
 
@@ -87,7 +141,9 @@ match core.applet.panel_type {
 - `TogglePopup` - Show/hide popup
 - `TrashStatusChanged(TrashStatus)` - Filesystem event notification
 - `OpenTrashFolder` - Launch cosmic-files
-- *(Future)* `EmptyTrash`, `RestoreItems`, `EjectDrive`, `UninstallApp`
+- `EmptyTrash` - Trigger empty operation (Phase 2)
+- `RestoreItem(TrashItem)` - Restore specific item (Phase 2)
+- `DeleteItem(TrashItem)` - Permanently delete item (Phase 2)
 
 ## Event Flow: Real-Time Monitoring
 
