@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use crate::trash_status::TrashStatus;
-use crate::{file_manager, ui_panel_button, ui_popup};
+use crate::{file_manager, trash_operations, ui_panel_button, ui_popup};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::{Limits, Subscription, window::Id};
 use cosmic::iced_futures::stream;
@@ -20,6 +20,11 @@ pub struct AppModel {
 
     // Trash state (reactive)
     trash_status: TrashStatus,
+    trash_items: Vec<trash::TrashItem>,
+
+    // Operation state
+    empty_in_progress: bool,
+    operation_error: Option<String>,
 }
 
 /// Applet messages
@@ -35,8 +40,17 @@ pub enum Message {
 
     // Trash (Backend)
     TrashStatusChanged(TrashStatus),
+    TrashItemsLoaded(Vec<trash::TrashItem>),
+
     EmptyTrash,
-    RestoreItems,
+    EmptyTrashComplete(Result<(), String>),
+
+    RestoreItem(trash::TrashItem),
+    RestoreComplete(Result<std::path::PathBuf, String>),
+
+    DeleteItem(trash::TrashItem),
+    DeleteComplete(Result<(), String>),
+
     OpenTrashFolder,
 
     // [PHASE 2+] Drag &amp; Drop (foundation)
@@ -83,6 +97,9 @@ impl cosmic::Application for AppModel {
             popup: None,
             config,
             trash_status,
+            trash_items: Vec::new(),
+            empty_in_progress: false,
+            operation_error: None,
         };
 
         (app, Task::none())
@@ -171,6 +188,7 @@ impl cosmic::Application for AppModel {
         ])
     }
 
+    #[allow(clippy::too_many_lines)]
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
             Message::UpdateConfig(config) => {
@@ -179,11 +197,88 @@ impl cosmic::Application for AppModel {
 
             Message::TrashStatusChanged(status) => {
                 self.trash_status = status;
+
+                // Auto-reload item list when trash becomes non-empty
+                if !self.trash_status.is_empty {
+                    return Task::perform(trash_operations::list_items(), |result| {
+                        Message::TrashItemsLoaded(result.unwrap_or_default())
+                    })
+                    .map(cosmic::Action::App);
+                }
+                self.trash_items.clear();
+            }
+
+            Message::TrashItemsLoaded(items) => {
+                self.trash_items = items;
             }
 
             Message::OpenTrashFolder => {
                 // Open trash using cosmic-files --trash
                 file_manager::open_trash_folder();
+            }
+
+            Message::EmptyTrash => {
+                if self.empty_in_progress {
+                    return Task::none(); // Prevent multiple clicks
+                }
+
+                self.empty_in_progress = true;
+                self.operation_error = None;
+
+                return Task::perform(trash_operations::empty_trash(), |result| {
+                    Message::EmptyTrashComplete(result.map_err(|e| e.to_string()))
+                })
+                .map(cosmic::Action::App);
+            }
+
+            Message::EmptyTrashComplete(result) => {
+                self.empty_in_progress = false;
+
+                match result {
+                    Ok(()) => {
+                        self.trash_items.clear();
+                        // TrashStatusChanged will be sent by watcher
+                    }
+                    Err(e) => {
+                        self.operation_error = Some(format!("Failed to empty trash: {e}"));
+                        eprintln!("Empty trash error: {e}");
+                    }
+                }
+            }
+
+            Message::RestoreItem(item) => {
+                return Task::perform(trash_operations::restore_item(item), |result| {
+                    Message::RestoreComplete(result.map_err(|e| e.to_string()))
+                })
+                .map(cosmic::Action::App);
+            }
+
+            Message::RestoreComplete(result) => {
+                match result {
+                    Ok(path) => {
+                        eprintln!("Restored item to: {}", path.display());
+                        // TrashStatusChanged will be sent by watcher
+                    }
+                    Err(e) => {
+                        self.operation_error = Some(format!("Failed to restore: {e}"));
+                        eprintln!("Restore error: {e}");
+                    }
+                }
+            }
+
+            Message::DeleteItem(item) => {
+                return Task::perform(trash_operations::delete_item(item), |result| {
+                    Message::DeleteComplete(result.map_err(|e| e.to_string()))
+                })
+                .map(cosmic::Action::App);
+            }
+
+            Message::DeleteComplete(result) => {
+                if let Err(e) = result {
+                    self.operation_error = Some(format!("Failed to delete: {e}"));
+                    eprintln!("Delete error: {e}");
+                }
+                // TrashStatusChanged will be sent by watcher
             }
 
             Message::TogglePopup => {
@@ -215,9 +310,7 @@ impl cosmic::Application for AppModel {
             }
 
             // [FUTURE PHASES] - Placeholders
-            Message::EmptyTrash
-            | Message::RestoreItems
-            | Message::DndUriReceived(_)
+            Message::DndUriReceived(_)
             | Message::DndOfferAccepted
             | Message::DndOfferRejected
             | Message::EjectDrive(_)

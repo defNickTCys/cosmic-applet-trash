@@ -4,6 +4,7 @@ mod app;
 mod config;
 mod file_manager;
 mod i18n;
+mod trash_operations;
 mod trash_status;
 mod ui_panel_button;
 mod ui_popup;
