@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.thiagocys.CosmicAppletTrash</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Cosmic Trash Plus</name>
+  <summary>Advanced trash management with eject and uninstall features</summary>
+  <icon type="remote" width="64" height="64" scale="1">
+    https://github.com/thiagocys/CosmicAppletTrash/raw/main/data/icons/hicolor/scalable/apps/com.github.thiagocys.CosmicAppletTrash.svg
+  </icon>
+  <url type="vcs-browser">https://github.com/thiagocys/CosmicAppletTrash</url>
+  <launchable type="desktop-id">com.github.thiagocys.CosmicAppletTrash.desktop</launchable>
+  <provides>
+    <id>com.github.thiagocys.CosmicAppletTrash</id>
+    <binaries>
+      <binary>cosmic-applet-trash</binary>
+    </binaries>
+  </provides>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <categories>
+    <category>COSMIC</category>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>COSMIC</keyword>
+    <keyword>trash</keyword>
+    <keyword>eject</keyword>
+    <keyword>uninstall</keyword>
+  </keywords>
+  <content_rating type="oars-1.1" />
+</component>

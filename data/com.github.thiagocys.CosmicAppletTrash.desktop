@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=Cosmic Trash
+Comment=Trash management, disk eject, and app uninstall
+Type=Application
+Icon=com.github.thiagocys.CosmicAppletTrash-symbolic
+Exec=cosmic-applet-trash %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC;Utility;
+Keywords=COSMIC;trash;recycle;delete;eject;uninstall;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
+MimeType=
