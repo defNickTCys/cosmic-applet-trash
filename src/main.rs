@@ -4,7 +4,11 @@ mod app;
 mod config;
 mod file_manager;
 mod i18n;
+mod mime_icon;
+mod trash_item_metadata;
+mod trash_operations;
 mod trash_status;
+mod ui_items;
 mod ui_panel_button;
 mod ui_popup;
 
