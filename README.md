@@ -21,9 +21,17 @@ Advanced trash management applet for the COSMIC™ desktop environment.
 - **Automatic icon updates**: Icon and popup reflect trash status without panel restart
 - **Performance optimized**: Non-recursive monitoring, debounced events
 
+### ✅ Phase 2: Trash Items Management
+- **Items list UI**: Scrollable list with file icons, names, sizes, and action buttons
+- **Metadata detection**: Iterates all trash folders for accurate icons and sizes
+- **Sort functionality**: A-Z/Z-A sorting with animated triangle indicator
+- **Restore action**: Restores items to original location via trash-rs
+- **Delete action**: Permanently deletes items with confirmation
+- **Adaptive UI**: Title padding, proper alignment, scroll behavior (max 250px)
+- **Action buttons**: Native COSMIC buttons with tooltips
+
 ### Roadmap
 
-- **Phase 2**: Empty Trash & Restore Items actions with confirmation dialogs
 - **Phase 3**: Drag & Drop for disk eject (Udisks2 integration)
 - **Phase 4**: Drag & Drop for app uninstall (Flatpak/PackageKit integration)
 
@@ -33,19 +41,23 @@ Following strict modularization with "Native by Default" philosophy. See **[ARCH
 
 ```
 src/
-├── app.rs              # Application orchestrator (state + messages)
-├── trash_status.rs     # Backend: Trash monitoring logic
-├── file_manager.rs     # Native integration: cosmic-files launcher
-├── ui_panel_button.rs  # Frontend: Adaptive panel icon
-├── ui_popup.rs         # Frontend: Popup content
-├── config.rs           # Configuration management
-├── i18n.rs             # Internationalization
-├── lib.rs              # Public exports
-└── main.rs             # Entry point
+├── app.rs                  # Application orchestrator (state + messages)
+├── trash_status.rs         # Backend: Trash monitoring logic
+├── trash_item_metadata.rs  # Backend: Metadata detection (all folders)
+├── file_manager.rs         # Native integration: cosmic-files launcher
+├── ui_panel_button.rs      # Frontend: Adaptive panel icon
+├── ui_popup.rs             # Frontend: Popup container
+├── ui_items.rs             # Frontend: Items list with sort/actions
+├── config.rs               # Configuration management
+├── i18n.rs                 # Internationalization
+├── lib.rs                  # Public exports
+└── main.rs                 # Entry point
 ```
 
 **Key Modules**:
 - `trash_status.rs`: Pure trash state logic (no UI dependencies)
+- `trash_item_metadata.rs`: MIME detection and size calculation across all trash folders
+- `ui_items.rs`: Scrollable list with sort, restore, and delete actions
 - `file_manager.rs`: Direct `Command::spawn` following COSMIC patterns
 - `ui_panel_button.rs`: Context-aware rendering (Dock vs Panel)
 - `app.rs`: Reactive subscription for real-time updates

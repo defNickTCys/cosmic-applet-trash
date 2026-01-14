@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::config::Config;
+use crate::trash_item_metadata::EnrichedTrashItem;
 use crate::trash_status::TrashStatus;
 use crate::{file_manager, trash_operations, ui_panel_button, ui_popup};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
@@ -20,7 +21,8 @@ pub struct AppModel {
 
     // Trash state (reactive)
     trash_status: TrashStatus,
-    trash_items: Vec<trash::TrashItem>,
+    trash_items: Vec<EnrichedTrashItem>,
+    sort_ascending: bool, // true = A-Z, false = Z-A (folders always first)
 
     // Operation state
     empty_in_progress: bool,
@@ -45,13 +47,15 @@ pub enum Message {
     EmptyTrash,
     EmptyTrashComplete(Result<(), String>),
 
-    RestoreItem(trash::TrashItem),
+    RestoreItem(EnrichedTrashItem),
     RestoreComplete(Result<std::path::PathBuf, String>),
 
-    DeleteItem(trash::TrashItem),
+    DeleteItem(EnrichedTrashItem),
     DeleteComplete(Result<(), String>),
 
     OpenTrashFolder,
+    ToggleSortOrder,                  // Toggle sort order A-Z ↔ Z-A
+    Surface(cosmic::surface::Action), // For applet_tooltip
 
     // [PHASE 2+] Drag &amp; Drop (foundation)
     DndUriReceived(String),
@@ -83,8 +87,17 @@ impl cosmic::Application for AppModel {
         core: cosmic::Core,
         _flags: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
+        let mut commands = Vec::new();
+
         // 🔥 ESTADO INICIAL REATIVO: Verificar status da lixeira no init()
         let trash_status = TrashStatus::check();
+
+        // Load trash items immediately if not empty
+        if !trash_status.is_empty {
+            commands.push(Task::perform(trash_operations::list_items(), |result| {
+                cosmic::Action::App(Message::TrashItemsLoaded(result.unwrap_or_default()))
+            }));
+        }
 
         let config = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
             .map(|context| match Config::get_entry(&context) {
@@ -98,11 +111,12 @@ impl cosmic::Application for AppModel {
             config,
             trash_status,
             trash_items: Vec::new(),
+            sort_ascending: true, // Default A-Z ascending order
             empty_in_progress: false,
             operation_error: None,
         };
 
-        (app, Task::none())
+        (app, Task::batch(commands))
     }
 
     fn on_close_requested(&self, id: Id) -> Option<Message> {
@@ -116,7 +130,12 @@ impl cosmic::Application for AppModel {
 
     /// Popup window
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
-        ui_popup::view(&self.trash_status, &self.core)
+        ui_popup::view(
+            &self.trash_status,
+            &self.trash_items,
+            self.sort_ascending,
+            &self.core,
+        )
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
@@ -198,23 +217,40 @@ impl cosmic::Application for AppModel {
             Message::TrashStatusChanged(status) => {
                 self.trash_status = status;
 
-                // Auto-reload item list when trash becomes non-empty
-                if !self.trash_status.is_empty {
-                    return Task::perform(trash_operations::list_items(), |result| {
-                        Message::TrashItemsLoaded(result.unwrap_or_default())
-                    })
-                    .map(cosmic::Action::App);
-                }
-                self.trash_items.clear();
+                // Always reload list to ensure correct metadata/icons/ordering
+                // This fixes: wrong icons, missing sizes, incorrect folder sorting for new items
+                return Task::perform(trash_operations::list_items(), |result| {
+                    Message::TrashItemsLoaded(result.unwrap_or_default())
+                })
+                .map(cosmic::Action::App);
             }
 
             Message::TrashItemsLoaded(items) => {
-                self.trash_items = items;
+                // Enrich items with pre-computed metadata (size, icon)
+                let mut enriched_items: Vec<EnrichedTrashItem> = items
+                    .into_iter()
+                    .map(EnrichedTrashItem::from_trash_item)
+                    .collect();
+
+                // Sort: folders first (alphabetical), then files (alphabetical)
+                EnrichedTrashItem::sort_items(&mut enriched_items, self.sort_ascending);
+
+                self.trash_items = enriched_items;
             }
 
             Message::OpenTrashFolder => {
                 // Open trash using cosmic-files --trash
                 file_manager::open_trash_folder();
+            }
+            Message::ToggleSortOrder => {
+                // Toggle sort order (folders always stay first)
+                self.sort_ascending = !self.sort_ascending;
+                EnrichedTrashItem::sort_items(&mut self.trash_items, self.sort_ascending);
+            }
+            Message::Surface(action) => {
+                return cosmic::task::message(cosmic::Action::Cosmic(
+                    cosmic::app::Action::Surface(action),
+                ));
             }
 
             Message::EmptyTrash => {
@@ -246,39 +282,46 @@ impl cosmic::Application for AppModel {
                 }
             }
 
-            Message::RestoreItem(item) => {
-                return Task::perform(trash_operations::restore_item(item), |result| {
-                    Message::RestoreComplete(result.map_err(|e| e.to_string()))
-                })
+            Message::RestoreItem(enriched_item) => {
+                return Task::perform(
+                    trash_operations::restore_item(enriched_item.item),
+                    |result| Message::RestoreComplete(result.map_err(|e| e.to_string())),
+                )
                 .map(cosmic::Action::App);
             }
 
             Message::RestoreComplete(result) => {
                 match result {
                     Ok(path) => {
-                        eprintln!("Restored item to: {}", path.display());
-                        // TrashStatusChanged will be sent by watcher
+                        eprintln!("✅ Restored to: {}", path.display());
+                        // Watcher will auto-reload list via TrashStatusChanged
                     }
                     Err(e) => {
+                        eprintln!("❌ Restore failed: {e}");
                         self.operation_error = Some(format!("Failed to restore: {e}"));
-                        eprintln!("Restore error: {e}");
                     }
                 }
             }
 
-            Message::DeleteItem(item) => {
-                return Task::perform(trash_operations::delete_item(item), |result| {
-                    Message::DeleteComplete(result.map_err(|e| e.to_string()))
-                })
+            Message::DeleteItem(enriched_item) => {
+                return Task::perform(
+                    trash_operations::delete_item(enriched_item.item),
+                    |result| Message::DeleteComplete(result.map_err(|e| e.to_string())),
+                )
                 .map(cosmic::Action::App);
             }
 
             Message::DeleteComplete(result) => {
-                if let Err(e) = result {
-                    self.operation_error = Some(format!("Failed to delete: {e}"));
-                    eprintln!("Delete error: {e}");
+                match result {
+                    Ok(_) => {
+                        eprintln!("✅ Item permanently deleted");
+                        // Watcher will auto-reload list via TrashStatusChanged
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Delete failed: {e}");
+                        self.operation_error = Some(format!("Failed to delete: {e}"));
+                    }
                 }
-                // TrashStatusChanged will be sent by watcher
             }
 
             Message::TogglePopup => {
